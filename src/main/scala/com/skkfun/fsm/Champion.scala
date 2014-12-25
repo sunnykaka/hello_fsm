@@ -31,7 +31,7 @@ class Champion(property: Property) extends Entity(property) with FSM[State, Data
 
   when(Patrol) {
     case Event(ReadyForBattle, _) =>
-      lastSender = sender
+      lastSender = sender()
       goto(Battle)
   }
 
@@ -40,6 +40,7 @@ class Champion(property: Property) extends Entity(property) with FSM[State, Data
       val skill = selectSkill()
       lastSender ! SkillSelected(skill)
       stay()
+
     case Event(FightResult(hpChangeValue), _) =>
       underAttack(hpChangeValue)
       lastSender ! FightResultReceived(hp, headCount, !alive)
@@ -105,7 +106,7 @@ class Champion(property: Property) extends Entity(property) with FSM[State, Data
 
   whenUnhandled {
     case Event(ReadyForBattle, _) =>
-      lastSender = sender
+      lastSender = sender()
       bossCalledYou = true
       log.debug("泡澡中,勿打扰")
       stay()

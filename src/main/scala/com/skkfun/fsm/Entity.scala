@@ -1,8 +1,7 @@
 package com.skkfun.fsm
 
 import akka.actor.{ActorLogging, ActorRef}
-import com.twitter.util.{Duration, Stopwatch}
-
+import com.twitter.util.Stopwatch
 
 //event
 sealed trait BaseEvent

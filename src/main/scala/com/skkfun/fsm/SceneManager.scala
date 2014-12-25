@@ -3,18 +3,17 @@ package com.skkfun.fsm
 import akka.actor._
 import com.twitter.util.Stopwatch
 import concurrent.duration._
-import scala.collection.mutable.ListBuffer
 
 /**
  * User: Liub
  * Date: 2014/12/15
  */
-class SceneManager(championProperty: Property, goblinPropertyList: List[Property]) extends FSM[State, Data]{
+class SceneManager(entityFactory: EntityFactory) extends FSM[State, Data]{
 
-//  val log = Logging(context.system, this)
+  import entityFactory._
 
-  val champion = context.actorOf(Champion.props(championProperty))
-  val goblins = ListBuffer(goblinPropertyList.map((p) => context.actorOf(Goblin.props(p))) : _*)
+  val champion = createChampion(context)
+  val goblins = createGoblins(context)
   val r = util.Random
   var goblinInBattle: ActorRef = null
   val sw = Stopwatch.start()
@@ -32,10 +31,10 @@ class SceneManager(championProperty: Property, goblinPropertyList: List[Property
 
   when(Ready, 15.seconds) {
     case Event(StateTimeout, enemy) =>
-      def isMeetEnemy() = r.nextInt(10) <= 9
+      def isMeetEnemy = r.nextInt(10) <= 9
 
-      if(isMeetEnemy()) {
-        goblinInBattle = enemy match {
+      if(isMeetEnemy) {
+        goblinInBattle = (enemy: @unchecked) match {
           case Enemy(Some(goblin: ActorRef)) => goblin
           case Enemy(None) => goblins.remove(r.nextInt(goblins.size))
         }
@@ -43,7 +42,7 @@ class SceneManager(championProperty: Property, goblinPropertyList: List[Property
         goto(CoordinateBattle) using FightBattle(None, None)
       } else {
         log.debug("patrolling...")
-        stay
+        stay()
       }
 
   }
@@ -57,8 +56,8 @@ class SceneManager(championProperty: Property, goblinPropertyList: List[Property
       } else if(player == goblinInBattle) {
         stay using FightBattle(None, Some(PlayerWrapper(player, property)))
       } else {
-        log.error("error message where")
-        stay
+        log.error("error message here")
+        stay()
       }
 
     case Event(PlayerReady(_, _), FightBattle(None, Some(playerWrapper), _)) =>
@@ -67,18 +66,6 @@ class SceneManager(championProperty: Property, goblinPropertyList: List[Property
     case Event(PlayerReady(_, goblinProperty), FightBattle(Some(playerWrapper), None, _)) =>
       goto(InBattle) using FightBattle(Some(playerWrapper), Some(PlayerWrapper(goblinInBattle, goblinProperty)))
 
-
-//    case Event(PlayerReady(`champion`, championProperty), FightBattle(None, None, 1)) =>
-//      stay using FightBattle(Some(PlayerWrapper(champion, championProperty)), None)
-//
-//    case Event(PlayerReady(`goblinInBattle`, goblinProperty), FightBattle(None, None)) =>
-//      stay using FightBattle(None, Some(PlayerWrapper(goblinInBattle, goblinProperty)))
-//
-//    case Event(PlayerReady(`champion`, championProperty), FightBattle(None, Some(PlayerWrapper(goblinInBattle, goblinProperty)))) =>
-//      goto(InBattle) using FightBattle(Some(PlayerWrapper(champion, championProperty)), Some(PlayerWrapper(goblinInBattle, goblinProperty)))
-//
-//    case Event(PlayerReady(`goblinInBattle`, goblinProperty), FightBattle(Some(PlayerWrapper(champion, championProperty)), None)) =>
-//      goto(InBattle) using FightBattle(Some(PlayerWrapper(champion, championProperty)), Some(PlayerWrapper(goblinInBattle, goblinProperty)))
   }
 
   when(InBattle) {
@@ -109,7 +96,7 @@ class SceneManager(championProperty: Property, goblinPropertyList: List[Property
 
       } else {
 
-        stay
+        stay()
       }
 
   }
@@ -117,14 +104,12 @@ class SceneManager(championProperty: Property, goblinPropertyList: List[Property
   when(WaitForFightResultReceived) {
     case Event(FightResultReceived(hp, headCount, dead), fightBattle: FightBattle) =>
 
-      def gameOver(championWin: Boolean): State ={
+      def gameOver(): State ={
         val championName = fightBattle.championWrapper.get.property.name
         log.debug("===============================================")
         log.debug("===============================================")
-        log.debug("游戏结束! 用时: %d ms, %s战斗结果: %s".format(sw().inMilliseconds, championName, if(championWin) "胜利" else "失败"))
-        if(championWin) {
-          log.debug("%s还剩余%d血量".format(championName, fightBattle.championWrapper.get.hp))
-        }
+        log.debug("游戏结束! 用时: %d ms, %s战斗结果: %s".format(sw().inMilliseconds, championName, "胜利"))
+        log.debug("%s还剩余%d血量".format(championName, fightBattle.championWrapper.get.hp))
         log.debug("%s斩杀了%d个敌人".format(championName, fightBattle.championWrapper.get.headCount))
 
         stop()
@@ -162,7 +147,7 @@ class SceneManager(championProperty: Property, goblinPropertyList: List[Property
           }
           var s: State = null
           if(goblinDead && goblins.isEmpty) {
-            s = gameOver(true)
+            s = gameOver()
           } else if(championDead) {
             s = goto(WaitForChampionRevive) using Enemy( if(goblinDead) None else Some(goblinWrapper.player) )
           } else {
@@ -190,11 +175,7 @@ class SceneManager(championProperty: Property, goblinPropertyList: List[Property
       goblinInBattle ! ReadyForBattle
 
     case CoordinateBattle -> InBattle =>
-      (nextStateData: @unchecked) match {
-        case FightBattle(Some(PlayerWrapper(champion, championProperty)), Some(PlayerWrapper(goblinInBattle, goblinProperty)), _) =>
-          champion ! SelectSkill
-          goblinInBattle ! SelectSkill
-      }
+      sendSelectSkillEvent(nextStateData)
 
     case InBattle -> WaitForFightResultReceived =>
       (nextStateData: @unchecked) match {
@@ -203,21 +184,22 @@ class SceneManager(championProperty: Property, goblinPropertyList: List[Property
           goblinInBattle ! FightResult(goblinWrapper.lastHpChangeValue)
       }
 
-      //TODO 测试这个case能不能和CoordinateBattle -> InBattle合并
     case WaitForFightResultReceived -> InBattle =>
-      (nextStateData: @unchecked) match {
-        case FightBattle(Some(PlayerWrapper(champion, championProperty)), Some(PlayerWrapper(goblinInBattle, goblinProperty)), _) =>
-          champion ! SelectSkill
-          goblinInBattle ! SelectSkill
-      }
+      sendSelectSkillEvent(nextStateData)
+  }
 
+  def sendSelectSkillEvent = (param: Data) => (param: @unchecked) match {
+    case FightBattle(Some(PlayerWrapper(champion, championProperty)), Some(PlayerWrapper(goblinInBattle, goblinProperty)), _) =>
+      champion ! SelectSkill
+      goblinInBattle ! SelectSkill
   }
 
 }
 
+
 object SceneManager {
 
-  def props(champion: Property, goblins: List[Property]): Props = Props(classOf[SceneManager], champion, goblins)
+  def props(champion: Property, goblins: List[Property]): Props = Props(classOf[SceneManager], new EntityFactory(champion, goblins))
 
 
 }

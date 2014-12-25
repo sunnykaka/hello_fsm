@@ -21,7 +21,7 @@ class Goblin(property: Property) extends Entity(property) with FSM[State, Data]{
 
   when(Patrol) {
     case Event(ReadyForBattle, _) =>
-      lastSender = sender
+      lastSender = sender()
       goto(Battle)
   }
 
@@ -29,12 +29,12 @@ class Goblin(property: Property) extends Entity(property) with FSM[State, Data]{
     case Event(SelectSkill, _) =>
       val skill = selectSkill()
       lastSender ! SkillSelected(skill)
-      stay
+      stay()
 
     case Event(FightResult(hpChangeValue), _) =>
       underAttack(hpChangeValue)
       lastSender ! FightResultReceived(hp, headCount, !alive)
-      stay
+      stay()
 
     case Event(Lose, _) =>
       stop()
